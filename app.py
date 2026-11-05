@@ -65,14 +65,47 @@ def send_discord_embed(webhook_url, title, description, color, game_name=None):
         logging.error(f"Discord send error: {e}")
 
 # === Roblox API ===
+
+# Authenticated Roblox session
+roblox_session = requests.Session()
+roblox_lock = threading.Lock()
+
+cookie = os.environ["ROBLOX_COOKIE"]
+roblox_session.cookies.set(
+    ".ROBLOSECURITY",
+    cookie,
+    domain=".roblox.com",
+    path="/"
+)
+
 def get_user_presence(user_id: int):
     url = "https://presence.roblox.com/v1/presence/users"
     payload = {"userIds": [user_id]}
-    headers = {"Content-Type": "application/json"}
-    r = requests.post(url, json=payload, headers=headers, timeout=10)
-    r.raise_for_status()
-    data = r.json()["userPresences"][0]
-    return data["userPresenceType"], data.get("gameId"), data.get("placeId")
+
+    with roblox_lock:
+        response = roblox_session.post(
+            url, json=payload, timeout=10
+        )
+
+        # Retry if Roblox requires a CSRF token
+        token = response.headers.get("x-csrf-token")
+        if response.status_code == 403 and token:
+            response = roblox_session.post(
+                url,
+                json=payload,
+                headers={"x-csrf-token": token},
+                timeout=10
+            )
+
+        response.raise_for_status()
+        data = response.json()["userPresences"][0]
+
+    return (
+        data["userPresenceType"],
+        data.get("gameId"),
+        data.get("placeId")
+    )
+
 
 def get_game_name(place_id: str):
     if not place_id:
